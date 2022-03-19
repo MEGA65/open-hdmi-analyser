@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 struct mode_line {
   int x_res,y_res,frame_rate;
@@ -34,7 +36,7 @@ struct mode_line modelines[]
   {1920,1080,60,148.35,1920,2008,2052,2200,1080,1084,1089,1125,+1,+1,0},
   {1920,1080,60,148.50,1920,2008,2052,2200,1080,1084,1088,1125,-1,-1,0},
   {1920,1080,60,74.18,1920,2008,2052,2200,1080,1084,1094,1124,+1,+1,1},
-  {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}
+  {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}
 };
 
 
@@ -55,6 +57,16 @@ char *binstr(unsigned int v)
 void check_if_same(int *ref,int new)
 {
   if (*ref!=new) *ref=-1;
+}
+
+void check_value(int *err,int a, int b,char *name)
+{
+  int d=a-b;
+  int e=d*d;
+  if (e&&name) {
+    fprintf(stdout,"      %s: saw %d, expected %d\n",name,a,b);
+  }
+  *err+=e;
 }
 
 int main(int argc,char **argv)
@@ -144,6 +156,7 @@ int main(int argc,char **argv)
   int hsync_pol=-1;
   int vsync_rasters=-1;
   int high_max=-1, low_max=-1, frame_count=-1;
+  int hsync_len=-1;
   
   for(int i=0;i<65536;i++) {
     vsynclowbins[i]=0;
@@ -289,7 +302,7 @@ int main(int argc,char **argv)
 	  vsynchigh_gap_history[0],vsynchigh_gap_history[1],vsynchigh_gap_history[2]);
   fprintf(stdout,"DEBUG: VSYNC- intervals = %d %d %d\n",
 	  vsynclow_gap_history[0],vsynclow_gap_history[1],vsynclow_gap_history[2]);
-  
+
   int raster_len=hsynchigh_gap_history[0];
   
   for (int n=0;n<3;n++) {
@@ -357,7 +370,7 @@ int main(int argc,char **argv)
     frame_count = high_max;
   } else if (!(vsync_low_len%raster_len)) {
     vsync_pol=0;
-    vsync_rasters=vsync_low_len/raster_len;
+    vsync_rasters=vsync_low_len/raster_len; 
     frame_count = low_max;
   } else {
     vsync_pol=-1;
@@ -381,6 +394,7 @@ int main(int argc,char **argv)
     }
   }
   fprintf(stdout,"%d(x%d) ",max_n,max);
+  hsync_len=max_n;
 
   max=-1;
   max_n=-1;
@@ -393,5 +407,58 @@ int main(int argc,char **argv)
   fprintf(stdout,"%d(x%d) ",max_n,max);
   fprintf(stdout,"\n");
 
+  int best_mode=-1;
+  int mode_error=-1;
+  struct mode_line format;
+  bzero(&format,sizeof(format));
+  format.h_total=raster_len;
+  format.v_total=rasters_per_frame;
+  format.hsync_pol=hsync_pol?hsync_pol:-1;
+  format.vsync_pol=vsync_pol?vsync_pol:-1;
+  format.interlaced=0;
 
+  for(int m=0;modelines[m].x_res>0;m++) {
+    int this_error=0;
+    check_value(&this_error,format.h_total,modelines[m].h_total,NULL);
+    check_value(&this_error,format.v_total,modelines[m].v_total,NULL);
+    check_value(&this_error,format.hsync_pol,modelines[m].vsync_pol,NULL);
+    int mode_hsync_len=modelines[m].hsync_end-modelines[m].hsync_start;
+    check_value(&this_error,hsync_len,mode_hsync_len,NULL);
+    int mode_vsync_len=modelines[m].vsync_end-modelines[m].vsync_start;
+    check_value(&this_error,vsync_rasters,mode_vsync_len,NULL);
+#if 0
+    fprintf(stdout,"DEBUG: Cumulative error = %d\n",this_error);
+
+    fprintf(stdout,"DEBUG: Comparison to: %dx%d %dHz %sinterlaced (mode error = %d)\n",
+	    modelines[m].x_res,modelines[m].y_res,
+	    modelines[m].frame_rate,
+	    modelines[m].interlaced?"":"non-",
+	    this_error);
+#endif
+    if (mode_error==-1||this_error<mode_error) {
+      mode_error=this_error;
+      best_mode=m;
+    }
+  }
+
+  fprintf(stdout,"INFO: Mode most closely matches %dx%d %dHz %sinterlaced (mode error = %d)\n",
+	  modelines[best_mode].x_res,modelines[best_mode].y_res,
+	  modelines[best_mode].frame_rate,
+	  modelines[best_mode].interlaced?"":"non-",
+	  mode_error);
+  if (mode_error)
+  {
+    fprintf(stdout,"INFO: The mode differs from the expected mode in the following ways:\n");
+    int this_error=0;
+    check_value(&this_error,format.h_total,modelines[best_mode].h_total,"h_total");
+    check_value(&this_error,format.v_total,modelines[best_mode].v_total,"v_total");
+    check_value(&this_error,format.hsync_pol,modelines[best_mode].vsync_pol,"vsync_pol");
+    int mode_hsync_len=modelines[best_mode].hsync_end-modelines[best_mode].hsync_start;
+    check_value(&this_error,hsync_len,mode_hsync_len,"hsync_len");
+    int mode_vsync_len=modelines[best_mode].vsync_end-modelines[best_mode].vsync_start;
+    check_value(&this_error,vsync_rasters,mode_vsync_len,"vsync_len");
+  }
+
+  
 }
+
