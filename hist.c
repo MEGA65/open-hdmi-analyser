@@ -69,6 +69,90 @@ void check_value(int *err,int a, int b,char *name)
   *err+=e;
 }
 
+int flip10(int i)
+{
+  int o=0;
+  for(int b=0;b<10;b++)
+    if (i&(1<<b)) o|=(1<<(9-b));
+  return o;
+}
+
+
+int dvi_is_pixel[1024];
+int dvi_is_control[1024];
+int dvi_is_data[1024];
+int dvi_value[1024];
+
+int count_ones(int v)
+{
+  int count=0;
+  for(int i=1;i<9;i++) {
+    int one=(v>>i)&1;
+    if (one) count++;
+  }
+  return count;
+}
+
+int calc_dvi_code_table(void)
+{
+  // Clear table
+  for(int i=0;i<1024;i++) {
+    dvi_is_pixel[i]=0;
+    dvi_is_control[i]=0;
+    dvi_is_data[i]=0;
+    dvi_value[i]=0;
+  }
+
+  dvi_is_control[0x0ab]=1;
+  dvi_is_control[0x0aa]=1;
+  dvi_is_control[0x354]=1;
+  dvi_is_control[0x355]=1;
+  
+  for(int i=0;i<256;i++) {
+    int xor_word=(i&1);
+    int xnor_word=(i&1);    
+    for(int b=1;b<8;b++) {
+      xor_word|=( ((i>>b)&1)^((xor_word>>(b-1))&1) )<<b;
+      xnor_word|=( ((i>>b)&1)^((xnor_word>>(b-1))&1)^1 )<<b;
+    }
+    xor_word|=0x100;
+
+    int word=-1;
+    
+    // Store non-inverted words
+    if (0) fprintf(stderr,"DEBUG: %d vs %d ones for $%03X vs $%03X\n",
+		   count_ones(xor_word),count_ones(xnor_word),
+		   xor_word,xnor_word);
+    if ((count_ones(i)>4)||((count_ones(i)==4)&&(!(i&1))))
+      {
+	word=xnor_word;
+	dvi_is_pixel[xnor_word]=1;
+	dvi_value[xnor_word]=i;
+	// fprintf(stderr,"DEBUG: Skipping XOR encoding of %d\n",i);
+      }
+    else
+      {
+	word=xor_word;
+	dvi_is_pixel[xor_word]=1;
+	dvi_value[xor_word]=i;
+	// fprintf(stderr,"DEBUG: Skipping XNOR encoding of %d\n",i);
+      }
+
+    if (count_ones(word)!=4) {
+      word^=0x2ff;
+      dvi_is_pixel[word]=1;
+      dvi_value[word]=i;
+    } else {
+      // fprintf(stderr,"DEBUG: Skipping inverted of %d\n",i);
+    }
+    
+  }
+
+  int count=0;
+  for(int i=0;i<1024;i++) if (dvi_is_pixel[i]) count++;
+  fprintf(stderr,"DEBUG: %d unique pixel values\n",count);
+}
+
 int main(int argc,char **argv)
 {
   if (argc!=2) {
@@ -76,6 +160,8 @@ int main(int argc,char **argv)
     exit(-1);
   }
 
+  calc_dvi_code_table();
+  
   FILE *f=fopen(argv[1],"rb");
   if (!f) {
     perror("fopen");
@@ -89,9 +175,9 @@ int main(int argc,char **argv)
   while(n==8) {
     
     if (count<D_MAX) {
-      d[0][count]=(buff[0]<<2)+(buff[1]>>6);
-      d[1][count]=((buff[1]<<6)&0x3c0)+(buff[2]>>2);
-      d[2][count]=(buff[3]<<2)+(buff[4]>>6);
+      d[0][count]=flip10((buff[0]<<2)+(buff[1]>>6));
+      d[1][count]=flip10(((buff[1]<<6)&0x3c0)+(buff[2]>>2));
+      d[2][count]=flip10((buff[3]<<2)+(buff[4]>>6));
       d_len=count;
 #if 0
       fprintf(stdout,"%7d: %03x %03x %03x\n",
@@ -128,8 +214,8 @@ int main(int argc,char **argv)
 
   int ctrlrunlen[4]={0,0,0,0};
   int ctrlruns[4]={0,0,0,0};
-  // int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
-  int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
+  int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
+  // int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
 
   int ctrlrunlen_bins[4][4096];
   for(int c=0;c<4;c++) for(int l=0;l<4096;l++) ctrlrunlen_bins[c][l]=0;
