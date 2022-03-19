@@ -47,8 +47,8 @@ int d_len=0;
 char bs_out[17];
 char *binstr(unsigned int v)
 {
-  for(int i=0;i<16;i++) {
-    if (v&(1<<i)) bs_out[i]='1'; else bs_out[i]='0';
+  for(int i=9;i>=0;i--) {
+    if (v&(1<<i)) bs_out[9-i]='1'; else bs_out[9-i]='0';
   }
   bs_out[16]=0;
   return bs_out;
@@ -69,19 +69,14 @@ void check_value(int *err,int a, int b,char *name)
   *err+=e;
 }
 
-int flip10(int i)
-{
-  int o=0;
-  for(int b=0;b<10;b++)
-    if (i&(1<<b)) o|=(1<<(9-b));
-  return o;
-}
-
-
 int dvi_is_pixel[1024];
 int dvi_is_control[1024];
 int dvi_is_data[1024];
+int dvi_is_guard[1024];
+int dvi_is_valid[1024];
 int dvi_value[1024];
+
+int dvi_counts[1024]={0};
 
 int count_ones(int v)
 {
@@ -100,13 +95,74 @@ int calc_dvi_code_table(void)
     dvi_is_pixel[i]=0;
     dvi_is_control[i]=0;
     dvi_is_data[i]=0;
+    dvi_is_guard[i]=0;
+    dvi_is_valid[i]=0;
     dvi_value[i]=0;
   }
 
+  // Guard bands for each channel
+  // channel 0 = 1011001100 = $2cc
+  // channel 1 = 0100110011 = $133
+  // channel 2 = 1011001100 = $2cc
+  // (same as channel 0)
+  dvi_is_guard[0x2cc]=1; dvi_value[0x2cc]=0;
+  dvi_is_guard[0x133]=1; dvi_value[0x133]=0;
+  
+  
+  
+  // 4-bit TERC data words
+  // 0 -> $29c = 1010011100
+  dvi_is_valid[0x29c]=1; dvi_is_data[0x29c]=1; dvi_value[0x29c]=0;
+  // 1 -> $263 = 1001100011;
+  dvi_is_valid[0x263]=1; dvi_is_data[0x263]=1; dvi_value[0x263]=1;
+  // 2 -> $2e4 = 1011100100;
+  dvi_is_valid[0x2e4]=1; dvi_is_data[0x2e4]=1; dvi_value[0x2e4]=2;
+  // 3 -> $2e2 = 1011100010;
+  dvi_is_valid[0x2e2]=1; dvi_is_data[0x2e2]=1; dvi_value[0x2e2]=3;
+  // 4 -> $171 = 0101110001;
+  dvi_is_valid[0x171]=1; dvi_is_data[0x171]=1; dvi_value[0x171]=4;
+  // 5 -> $11e = 0100011110;
+  dvi_is_valid[0x11e]=1; dvi_is_data[0x11e]=1; dvi_value[0x11e]=5;
+  // 6 -> $18e = 0110001110;
+  dvi_is_valid[0x18e]=1; dvi_is_data[0x18e]=1; dvi_value[0x18e]=6;
+  // 7 -> $13c = 0100111100;
+  dvi_is_valid[0x13c]=1; dvi_is_data[0x13c]=1; dvi_value[0x13c]=7;
+  // 8 -> $2cc = 1011001100;
+  dvi_is_valid[0x2cc]=1; dvi_is_data[0x2cc]=1; dvi_value[0x2cc]=8;
+  // 9 -> $139 = 0100111001;
+  dvi_is_valid[0x139]=1; dvi_is_data[0x139]=1; dvi_value[0x139]=9;
+  // a -> $19c = 0110011100;
+  dvi_is_valid[0x19c]=1; dvi_is_data[0x19c]=1; dvi_value[0x19c]=0xa;
+  // b -> $2c6 = 1011000110;
+  dvi_is_valid[0x2c6]=1; dvi_is_data[0x2c6]=1; dvi_value[0x2c6]=0xb;
+  // c -> $28e = 1010001110;
+  dvi_is_valid[0x28e]=1; dvi_is_data[0x28e]=1; dvi_value[0x28e]=0xc;
+  // d -> $271 = 1001110001;
+  dvi_is_valid[0x271]=1; dvi_is_data[0x271]=1; dvi_value[0x271]=0xd;
+  // e -> $163 = 0101100011;
+  dvi_is_valid[0x163]=1; dvi_is_data[0x163]=1; dvi_value[0x163]=0xe;
+  // f -> $2c3 = 1011000011;  
+  dvi_is_valid[0x2c3]=1; dvi_is_data[0x2c3]=1; dvi_value[0x2c3]=0xf;
+  
+  // Control words  
+
+  /*
+    H V   WORD
+    0 0 = 0010101011
+    0 1 = 0010101010
+    1 0 = 1101010100
+    1 1 = 1101010101
+
+  */
+  
+  dvi_is_control[0x2ab]=1;
   dvi_is_control[0x0ab]=1;
-  dvi_is_control[0x0aa]=1;
+  dvi_is_control[0x154]=1;
   dvi_is_control[0x354]=1;
-  dvi_is_control[0x355]=1;
+  dvi_is_valid[0x2ab]=1;
+  dvi_is_valid[0x0ab]=1;
+  dvi_is_valid[0x154]=1;
+  dvi_is_valid[0x354]=1;
   
   for(int i=0;i<256;i++) {
     int xor_word=(i&1);
@@ -128,6 +184,7 @@ int calc_dvi_code_table(void)
 	word=xnor_word;
 	dvi_is_pixel[xnor_word]=1;
 	dvi_value[xnor_word]=i;
+	dvi_is_valid[xnor_word]=1;
 	// fprintf(stderr,"DEBUG: Skipping XOR encoding of %d\n",i);
       }
     else
@@ -135,12 +192,14 @@ int calc_dvi_code_table(void)
 	word=xor_word;
 	dvi_is_pixel[xor_word]=1;
 	dvi_value[xor_word]=i;
+	dvi_is_valid[xor_word]=1;
 	// fprintf(stderr,"DEBUG: Skipping XNOR encoding of %d\n",i);
       }
 
     if (count_ones(word)!=4) {
       word^=0x2ff;
       dvi_is_pixel[word]=1;
+      dvi_is_valid[word]=1;
       dvi_value[word]=i;
     } else {
       // fprintf(stderr,"DEBUG: Skipping inverted of %d\n",i);
@@ -172,13 +231,22 @@ int main(int argc,char **argv)
   
   int count=0;
   int n=fread(buff,1,8,f);
+  int invalid=0;
   while(n==8) {
     
     if (count<D_MAX) {
-      d[0][count]=flip10((buff[0]<<2)+(buff[1]>>6));
-      d[1][count]=flip10(((buff[1]<<6)&0x3c0)+(buff[2]>>2));
-      d[2][count]=flip10((buff[3]<<2)+(buff[4]>>6));
+      d[0][count]=((buff[0]<<2)+(buff[1]>>6));
+      d[1][count]=(((buff[1]<<6)&0x3c0)+(buff[2]>>2));
+      d[2][count]=((buff[3]<<2)+(buff[4]>>6));
       d_len=count;
+
+      if (!dvi_is_valid[d[0][count]]) invalid++;
+      if (!dvi_is_valid[d[1][count]]) invalid++;
+      if (!dvi_is_valid[d[2][count]]) invalid++;
+
+      dvi_counts[d[0][count]]++;
+      dvi_counts[d[1][count]]++;
+      dvi_counts[d[2][count]]++;
 #if 0
       fprintf(stdout,"%7d: %03x %03x %03x\n",
 	      count,d[0][count],d[1][count],d[2][count]);
@@ -192,6 +260,14 @@ int main(int argc,char **argv)
   fclose(f);
   
   fprintf(stdout,"DEBUG: Read %d records.\n",count);
+  if (invalid) {
+    fprintf(stdout,"ERROR: %d invalid DVI 10-bit words observed:\n",invalid);
+    for(int i=0;i<1024;i++) {
+      if ((!dvi_is_valid[i])&&(dvi_counts[i]))
+	fprintf(stdout,"       %dx $%03x (%s)\n",dvi_counts[i],i,binstr(i));
+    }
+  }
+	  
   if ((count-1)>d_len) {
     fprintf(stdout,"WARN: Using only the first 64M records (the first 512MiB of the file).\n");
     fprintf(stdout,"WARN: Ignoring the last %d records.\n",count-d_len);
@@ -214,8 +290,8 @@ int main(int argc,char **argv)
 
   int ctrlrunlen[4]={0,0,0,0};
   int ctrlruns[4]={0,0,0,0};
-  int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
-  // int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
+  //  int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
+  int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
 
   int ctrlrunlen_bins[4][4096];
   for(int c=0;c<4;c++) for(int l=0;l<4096;l++) ctrlrunlen_bins[c][l]=0;
