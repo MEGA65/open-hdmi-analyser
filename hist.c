@@ -74,6 +74,7 @@ int dvi_is_control[1024];
 int dvi_is_data[1024];
 int dvi_is_guard[1024];
 int dvi_is_valid[1024];
+int dvi_terc_value[1024];
 int dvi_value[1024];
 
 int dvi_counts[1024]={0};
@@ -88,6 +89,50 @@ int count_ones(int v)
   return count;
 }
 
+int flip10(int v)
+{
+  int o=0;
+  for(int n=0;n<10;n++)
+    o|=(v&(1<<n))?(1<<(9-n)):0;
+
+  //  fprintf(stdout,"DEBUG: %s flips to",binstr(v));
+  //  fprintf(stdout," %s\n",binstr(o));
+  
+  return o;
+}
+
+int decode_10b(int c)
+{
+  //  fprintf(stderr,"decode_10b(0x%03x)\n",c);
+  int d=0;
+  int v=c&0xff;
+  if (c&0x200) {
+    v=(c&0xff)^0x1ff;
+  }
+  d=v&1;
+  if (c&0x100) {
+    // XOR
+    for(int i=1;i<8;i++) {
+      int b=(v&(1<<i))?1:0;
+      int db=(v&(1<<(i-1)))?1:0;
+      //      fprintf(stderr,"bit %d: %d XOR %d = %d\n",i,b,db,b^db);
+      b=b^db;
+      d|=(b<<i);
+    }
+  } else {
+    //    fprintf(stderr,"XNOR\n");
+    // XNOR
+    for(int i=7;i>0;i--) {
+      int b=(v&(1<<i))?1:0;
+      int db=(v&(1<<(i-1)))?1:0;
+      //      fprintf(stderr,"bit %d: %d XNOR %d = %d\n",i,b,db,b^db^1);
+      b=(b^db)^1;
+      d|=(b<<i);
+    }
+  }
+  return d;
+}
+
 int calc_dvi_code_table(void)
 {
   // Clear table
@@ -97,6 +142,7 @@ int calc_dvi_code_table(void)
     dvi_is_data[i]=0;
     dvi_is_guard[i]=0;
     dvi_is_valid[i]=0;
+    dvi_terc_value[i]=0;
     dvi_value[i]=0;
   }
 
@@ -112,37 +158,17 @@ int calc_dvi_code_table(void)
   
   // 4-bit TERC data words
   // 0 -> $29c = 1010011100
-  dvi_is_valid[0x29c]=1; dvi_is_data[0x29c]=1; dvi_value[0x29c]=0;
-  // 1 -> $263 = 1001100011;
-  dvi_is_valid[0x263]=1; dvi_is_data[0x263]=1; dvi_value[0x263]=1;
-  // 2 -> $2e4 = 1011100100;
-  dvi_is_valid[0x2e4]=1; dvi_is_data[0x2e4]=1; dvi_value[0x2e4]=2;
-  // 3 -> $2e2 = 1011100010;
-  dvi_is_valid[0x2e2]=1; dvi_is_data[0x2e2]=1; dvi_value[0x2e2]=3;
-  // 4 -> $171 = 0101110001;
-  dvi_is_valid[0x171]=1; dvi_is_data[0x171]=1; dvi_value[0x171]=4;
-  // 5 -> $11e = 0100011110;
-  dvi_is_valid[0x11e]=1; dvi_is_data[0x11e]=1; dvi_value[0x11e]=5;
-  // 6 -> $18e = 0110001110;
-  dvi_is_valid[0x18e]=1; dvi_is_data[0x18e]=1; dvi_value[0x18e]=6;
-  // 7 -> $13c = 0100111100;
-  dvi_is_valid[0x13c]=1; dvi_is_data[0x13c]=1; dvi_value[0x13c]=7;
-  // 8 -> $2cc = 1011001100;
-  dvi_is_valid[0x2cc]=1; dvi_is_data[0x2cc]=1; dvi_value[0x2cc]=8;
-  // 9 -> $139 = 0100111001;
-  dvi_is_valid[0x139]=1; dvi_is_data[0x139]=1; dvi_value[0x139]=9;
-  // a -> $19c = 0110011100;
-  dvi_is_valid[0x19c]=1; dvi_is_data[0x19c]=1; dvi_value[0x19c]=0xa;
-  // b -> $2c6 = 1011000110;
-  dvi_is_valid[0x2c6]=1; dvi_is_data[0x2c6]=1; dvi_value[0x2c6]=0xb;
-  // c -> $28e = 1010001110;
-  dvi_is_valid[0x28e]=1; dvi_is_data[0x28e]=1; dvi_value[0x28e]=0xc;
-  // d -> $271 = 1001110001;
-  dvi_is_valid[0x271]=1; dvi_is_data[0x271]=1; dvi_value[0x271]=0xd;
-  // e -> $163 = 0101100011;
-  dvi_is_valid[0x163]=1; dvi_is_data[0x163]=1; dvi_value[0x163]=0xe;
-  // f -> $2c3 = 1011000011;  
-  dvi_is_valid[0x2c3]=1; dvi_is_data[0x2c3]=1; dvi_value[0x2c3]=0xf;
+  int terc4_words[16]={0x29c,0x263,0x2e4,0x2e2,0x171,0x11e,0x18e,0x13c,
+		       0x2cc,0x139,0x19c,0x2c6,0x28e,0x271,0x163,0x2c3};
+
+  for(int i=0;i<16;i++) {
+    int v=terc4_words[i];
+    // Don't set valid so that we don't get upset later about the TERC values that
+    // are overloading normal pixel byte values
+    //    dvi_is_valid[v]=1;
+    dvi_is_data[v]=1;
+    dvi_terc_value[v]=i;
+  }
   
   // Control words  
 
@@ -173,34 +199,75 @@ int calc_dvi_code_table(void)
     }
     xor_word|=0x100;
 
+    if (decode_10b(xor_word)!=i) {
+      fprintf(stderr,"ERROR: DVI XOR word 0x%03x (%s) should decode to 0x%02x, but decodes to 0x%02x\n",
+	      xor_word,binstr(xor_word),i,decode_10b(xor_word));
+      exit(-1);
+    }
+    
+    if (decode_10b(xnor_word)!=i) {
+      fprintf(stderr,"ERROR: DVI XNOR word 0x%03x (%s) should decode to 0x%02x, but decodes to 0x%02x\n",
+	      xor_word,binstr(xnor_word),i,decode_10b(xnor_word));
+      exit(-1);
+    }
+    
     int word=-1;
     
     // Store non-inverted words
-    if (0) fprintf(stderr,"DEBUG: %d vs %d ones for $%03X vs $%03X\n",
-		   count_ones(xor_word),count_ones(xnor_word),
-		   xor_word,xnor_word);
+    if (0) {
+      fprintf(stderr,"DEBUG: value=%d (%d ones), %d vs %d ones for $%03X (%s)",
+	      i,count_ones(i),count_ones(xor_word),count_ones(xnor_word),
+	      xor_word,binstr(xor_word));
+      fprintf(stderr," vs $%03X (%s)\n",xnor_word,binstr(xnor_word));
+    }
     if ((count_ones(i)>4)||((count_ones(i)==4)&&(!(i&1))))
       {
 	word=xnor_word;
+	if (dvi_is_valid[xnor_word]) {
+	  fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (xnor)\n",
+		  xnor_word,binstr(xnor_word));
+	  fprintf(stderr,"       prev: is_pixel=%d, is_control=%d, is_data=%d, is_guard=%d, value=0x%02x\n",
+		  dvi_is_pixel[xnor_word],
+		  dvi_is_control[xnor_word],
+		  dvi_is_data[xnor_word],
+		  dvi_is_guard[xnor_word],
+		  dvi_value[xnor_word]);
+	  
+	  exit(-1);
+	}
 	dvi_is_pixel[xnor_word]=1;
 	dvi_value[xnor_word]=i;
 	dvi_is_valid[xnor_word]=1;
 	// fprintf(stderr,"DEBUG: Skipping XOR encoding of %d\n",i);
+	//	fprintf(stderr,"DEBUG: Pixel value 0x%02X XNOR encodes to %4d (%s)\n",i,xnor_word,binstr(xnor_word));
       }
     else
       {
 	word=xor_word;
+	if (dvi_is_valid[xor_word]) {
+	  fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (xor)\n",
+		  xor_word,binstr(xor_word));
+	  fprintf(stderr,"       prev: is_pixel=%d, value=0x%02x\n",
+		  dvi_is_pixel[xor_word],dvi_value[xor_word]);
+	  exit(-1);
+	}
 	dvi_is_pixel[xor_word]=1;
 	dvi_value[xor_word]=i;
 	dvi_is_valid[xor_word]=1;
-	// fprintf(stderr,"DEBUG: Skipping XNOR encoding of %d\n",i);
+	//	fprintf(stderr,"DEBUG: Pixel value 0x%02X XOR  encodes to %4d (%s)\n",i,xor_word,binstr(xor_word));
       }
 
-    if (count_ones(word)!=4) {
+    if ((count_ones(word)!=4)&&(word!=xor_word)) {
       word^=0x2ff;
+      if (dvi_is_valid[word]) {
+	fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (neg)\n",
+	        word,binstr(word));
+	exit(-1);
+      }
       dvi_is_pixel[word]=1;
       dvi_is_valid[word]=1;
       dvi_value[word]=i;
+      //      fprintf(stderr,"DEBUG: Pixel value 0x%02X NEG  encodes to %4d (%s)\n",i,word,binstr(word));
     } else {
       // fprintf(stderr,"DEBUG: Skipping inverted of %d\n",i);
     }
@@ -210,6 +277,18 @@ int calc_dvi_code_table(void)
   int count=0;
   for(int i=0;i<1024;i++) if (dvi_is_pixel[i]) count++;
   fprintf(stderr,"DEBUG: %d unique pixel values\n",count);
+}
+
+int analyse_bad_10b(int c)
+{
+  int d=decode_10b(c);
+  fprintf(stdout,"                  Code decodes to 0x%02x\n",d);
+  for(int j=0;j<1024;j++) {
+    if (dvi_is_data[j]&&dvi_value[j]==d)
+      fprintf(stdout,"                    Canonical code is 0x%03x (%s)\n",
+	      j,binstr(j));
+  }
+  return 0;
 }
 
 int main(int argc,char **argv)
@@ -235,9 +314,10 @@ int main(int argc,char **argv)
   while(n==8) {
     
     if (count<D_MAX) {
-      d[0][count]=((buff[0]<<2)+(buff[1]>>6));
-      d[1][count]=(((buff[1]<<6)&0x3c0)+(buff[2]>>2));
-      d[2][count]=((buff[3]<<2)+(buff[4]>>6));
+      // File format has bit order reversed, so fix that now.
+      d[0][count]=flip10((buff[0]<<2)+(buff[1]>>6));
+      d[1][count]=flip10(((buff[1]<<6)&0x3c0)+(buff[2]>>2));
+      d[2][count]=flip10((buff[3]<<2)+(buff[4]>>6));
       d_len=count;
 
       if (!dvi_is_valid[d[0][count]]) invalid++;
@@ -261,10 +341,12 @@ int main(int argc,char **argv)
   
   fprintf(stdout,"DEBUG: Read %d records.\n",count);
   if (invalid) {
-    fprintf(stdout,"ERROR: %d invalid DVI 10-bit words observed:\n",invalid);
+    fprintf(stdout,"ERROR: %d invalid DVI/TERC4 10-bit words observed:\n",invalid);
     for(int i=0;i<1024;i++) {
-      if ((!dvi_is_valid[i])&&(dvi_counts[i]))
-	fprintf(stdout,"       %dx $%03x (%s)\n",dvi_counts[i],i,binstr(i));
+      if ((!dvi_is_valid[i])&&(dvi_counts[i])) {
+	fprintf(stdout,"       %9dx $%03x (%s)\n",dvi_counts[i],i,binstr(i));
+	analyse_bad_10b(i);
+      }
     }
   }
 	  
@@ -290,8 +372,8 @@ int main(int argc,char **argv)
 
   int ctrlrunlen[4]={0,0,0,0};
   int ctrlruns[4]={0,0,0,0};
-  //  int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
-  int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
+  int ctrl_vals[4]={0x0ab,0x0aa,0x354,0x355};
+  //int ctrl_vals[4]={0x2ab,0x0ab,0x154,0x354};
 
   int ctrlrunlen_bins[4][4096];
   for(int c=0;c<4;c++) for(int l=0;l<4096;l++) ctrlrunlen_bins[c][l]=0;
@@ -314,11 +396,18 @@ int main(int argc,char **argv)
   int last_hsynchigh_edge=0;
   int vsync_low_len=0;
   int vsync_high_len=0;
+  int hsync_low_len=0;
+  int hsync_high_len=0;
   int vsync_pol=-1;
   int hsync_pol=-1;
   int vsync_rasters=-1;
   int high_max=-1, low_max=-1, frame_count=-1;
   int hsync_len=-1;
+  int vsync_len=-1;
+
+  // Track the H/V sync values
+  int hsync_state=0;
+  int vsync_state=0;
   
   for(int i=0;i<65536;i++) {
     vsynclowbins[i]=0;
@@ -328,10 +417,17 @@ int main(int argc,char **argv)
   }
   
   for(int i=0;i<d_len;i++) {
+    // Track HSYNC/VSYNC state
+    if (d[0][i]==ctrl_vals[0]||d[0][i]==ctrl_vals[1]) hsync_state=0;
+    if (d[0][i]==ctrl_vals[2]||d[0][i]==ctrl_vals[3]) hsync_state=1;
+    if (d[0][i]==ctrl_vals[0]||d[0][i]==ctrl_vals[2]) vsync_state=0;
+    if (d[0][i]==ctrl_vals[1]||d[0][i]==ctrl_vals[3]) vsync_state=1;
+
     for(int c=0;c<4;c++) {
+
       if (d[0][i]==ctrl_vals[c]) {
 	if (!ctrlrunlen[c]) ctrlruns[c]++;
-	ctrlrunlen[c]++;      
+	ctrlrunlen[c]++;
       }
       else {
 	if (ctrlrunlen[c]>4095) ctrlrunlen[c]=4095;	
@@ -343,7 +439,7 @@ int main(int argc,char **argv)
     ////////////////////////////////////////////////////////////////
     //  Log VSYNC behaviour
     ////////////////////////////////////////////////////////////////
-    if (d[0][i]==ctrl_vals[0]||d[0][i]==ctrl_vals[2]) {
+    if (!vsync_state) {
       // V-sync low
       vsynclowrun++;
       if (vsynchighrun) {
@@ -359,7 +455,7 @@ int main(int argc,char **argv)
 	vsynchighrun=0;	
       }
     }
-    else if (d[0][i]==ctrl_vals[1]||d[0][i]==ctrl_vals[3]) {
+    else if (vsync_state) {
       // V-sync high      
       vsynchighrun++;
       if (vsynclowrun) {
@@ -374,24 +470,11 @@ int main(int argc,char **argv)
 	vsynclowrun=0;	
       }
     }
-    else {
-      // Not a control word
-      if (vsynchighrun) {
-	if (vsynchighrun>0xffff) vsynchighrun=0xffff;
-	vsynchighbins[vsynchighrun]++;
-	vsynchighrun=0;	
-      }
-      if (vsynclowrun) {
-	if (vsynclowrun>0xffff) vsynclowrun=0xffff;
-	vsynclowbins[vsynclowrun]++;
-	vsynclowrun=0;	
-      }
-    }
     
     ////////////////////////////////////////////////////////////////
     //  Log HSYNC behaviour
     ////////////////////////////////////////////////////////////////
-    if (d[0][i]==ctrl_vals[0]||d[0][i]==ctrl_vals[1]) {
+    if (!hsync_state) {
       // H-sync low
       hsynclowrun++;
       if (hsynchighrun) {
@@ -406,7 +489,7 @@ int main(int argc,char **argv)
 	hsynchighrun=0;	
       }
     }
-    else if (d[0][i]==ctrl_vals[2]||d[0][i]==ctrl_vals[3]) {
+    else if (hsync_state) {
       // H-sync high
       hsynchighrun++;
       if (hsynclowrun) {
@@ -416,19 +499,6 @@ int main(int argc,char **argv)
 	for(int n=0;n<2;n++) hsynchigh_gap_history[n]=hsynchigh_gap_history[n+1];
 	hsynchigh_gap_history[2]=gap;
 	
-	if (hsynclowrun>0xffff) hsynclowrun=0xffff;
-	hsynclowbins[hsynclowrun]++;
-	hsynclowrun=0;	
-      }
-    }
-    else {
-      // Not a control word
-      if (hsynchighrun) {
-	if (hsynchighrun>0xffff) hsynchighrun=0xffff;
-	hsynchighbins[hsynchighrun]++;
-	hsynchighrun=0;	
-      }
-      if (hsynclowrun) {
 	if (hsynclowrun>0xffff) hsynclowrun=0xffff;
 	hsynclowbins[hsynclowrun]++;
 	hsynclowrun=0;	
@@ -526,20 +596,21 @@ int main(int argc,char **argv)
        vsync_low_len,raster_len,vsync_low_len*1.0/raster_len,
        vsync_high_len,raster_len,vsync_high_len*1.0/raster_len);
 
-  if (!(vsync_high_len%raster_len)) {
+  if (vsync_high_len<vsync_low_len) {
     vsync_pol=1;
     vsync_rasters=vsync_high_len/raster_len;
+    vsync_len=vsync_high_len;
     frame_count = high_max;
-  } else if (!(vsync_low_len%raster_len)) {
+  } else {
     vsync_pol=0;
     vsync_rasters=vsync_low_len/raster_len; 
+    vsync_len=vsync_low_len;
     frame_count = low_max;
-  } else {
+  }
+
+  if (vsync_len%raster_len) {
     vsync_pol=-1;
     fprintf(stdout,"ERROR: VSYNC pulses don't seem to be a multiple of the raster length.\n");
-    // Try to get most sensible possible value, in any case.
-    vsync_rasters=vsync_high_len/raster_len;
-    if (!vsync_rasters) vsync_rasters=vsync_high_len/raster_len;
   }
   fprintf(stdout,"INFO: VSYNC pulse lasts %d rasters, polarity is %s\n",
           vsync_rasters,(vsync_pol==1)?"POSITIVE":(vsync_pol==0?"NEGATIVE":"UNKNOWN"));
@@ -555,8 +626,8 @@ int main(int argc,char **argv)
       max_n=i;
     }
   }
+  hsync_low_len=max_n;
   fprintf(stdout,"%d(x%d) ",max_n,max);
-  hsync_len=max_n;
 
   max=-1;
   max_n=-1;
@@ -566,8 +637,11 @@ int main(int argc,char **argv)
       max_n=i;
     }
   }
+  hsync_high_len=max_n;
   fprintf(stdout,"%d(x%d) ",max_n,max);
   fprintf(stdout,"\n");
+  if (hsync_high_len<hsync_low_len) hsync_len=hsync_high_len; else hsync_len=hsync_low_len;
+  fprintf(stdout,"INFO: HSYNC duration is %d cycles\n",hsync_len);
 
   int best_mode=-1;
   int mode_error=-1;
