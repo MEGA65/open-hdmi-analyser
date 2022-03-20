@@ -238,8 +238,8 @@ int calc_dvi_code_table(void)
 	dvi_is_pixel[xnor_word]=1;
 	dvi_value[xnor_word]=i;
 	dvi_is_valid[xnor_word]=1;
-	// fprintf(stderr,"DEBUG: Skipping XOR encoding of %d\n",i);
-	//	fprintf(stderr,"DEBUG: Pixel value 0x%02X XNOR encodes to %4d (%s)\n",i,xnor_word,binstr(xnor_word));
+	//	fprintf(stderr,"DEBUG: Using XNOR encoding of %d\n",i);
+	//	 fprintf(stderr,"DEBUG: Pixel value 0x%02X XNOR encodes to %4d (%s)\n",i,xnor_word,binstr(xnor_word));
       }
     else
       {
@@ -257,7 +257,7 @@ int calc_dvi_code_table(void)
 	//	fprintf(stderr,"DEBUG: Pixel value 0x%02X XOR  encodes to %4d (%s)\n",i,xor_word,binstr(xor_word));
       }
 
-    if ((count_ones(word)!=4)&&(word!=xor_word)) {
+    {
       word^=0x2ff;
       if (dvi_is_valid[word]) {
 	fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (neg)\n",
@@ -268,8 +268,6 @@ int calc_dvi_code_table(void)
       dvi_is_valid[word]=1;
       dvi_value[word]=i;
       //      fprintf(stderr,"DEBUG: Pixel value 0x%02X NEG  encodes to %4d (%s)\n",i,word,binstr(word));
-    } else {
-      // fprintf(stderr,"DEBUG: Skipping inverted of %d\n",i);
     }
     
   }
@@ -307,6 +305,17 @@ int main(int argc,char **argv)
   }
   
   unsigned char buff[8];
+
+  int flip_check[1024]={0};
+  for(int i=0;i<1024;i++) {
+    int f=flip10(i);
+    if (flip_check[f]) {
+      fprintf(stderr,"ERROR: Multiple tokens flip to 0x%03x (%s), including 0x03x\n",f,binstr(f),i);
+      exit(-1);
+    }
+    flip_check[f]++;
+  }
+  fprintf(stdout,"DEBUG: Flip test passed.\n");
   
   int count=0;
   int n=fread(buff,1,8,f);
