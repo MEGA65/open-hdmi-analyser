@@ -16,10 +16,21 @@ int main(int argc,char **argv)
       ofs++;
     }
     if (sscanf(&line[ofs],"when \"%[01]\" => lookup <= \"%[01]\";  -- TERC4 %[01]",in,out,terc)==3) {
-      printf("%s -> %s TERC %s\n",in,out,terc);
+      printf("/* %s -> %s TERC %s */\n",in,out,terc);
+      int c=strtol(in, NULL, 2);
+      int v=strtol(out, NULL, 2);
+      int t=strtol(terc, NULL, 2);
+      printf("{0x%03x,1,0x%02x,1,0x%x},\n",
+	     c,v&0xff,t);
     }
     else if (sscanf(&line[ofs],"when \"%[01]\" => lookup <= \"%[01]\"",in,out)==2) {
-      printf("%s -> %s\n",in,out);
+      printf("/* %s -> %s */\n",in,out);
+      int c=strtol(in, NULL, 2);
+      int v=strtol(out, NULL, 2);
+      if (strlen(out)>2) {
+	printf("{0x%03x,1,0x%02x,0,0},\n",
+	       c,v&0xff);
+      }
     }
     
     line[0]=0; fgets(line,1024,f);
