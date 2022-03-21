@@ -169,7 +169,7 @@ int calc_dvi_code_table(void)
   dvi_is_guard[0x133]=1; dvi_value[0x133]=0;
   
   
-  
+#if 0  
   // 4-bit TERC data words
   // 0 -> $29c = 1010011100
   int terc4_words[16]={0x29c,0x263,0x2e4,0x2e2,0x171,0x11e,0x18e,0x13c,
@@ -183,6 +183,7 @@ int calc_dvi_code_table(void)
     dvi_is_data[v]=1;
     dvi_terc_value[v]=i;
   }
+#endif
   
   // Control words  
 
@@ -194,100 +195,33 @@ int calc_dvi_code_table(void)
     1 1 = 1101010101
 
   */
-  
-  dvi_is_control[0x2ab]=1;
-  dvi_is_control[0x0ab]=1;
-  dvi_is_control[0x154]=1;
-  dvi_is_control[0x354]=1;
-  dvi_is_valid[0x2ab]=1;
-  dvi_is_valid[0x0ab]=1;
-  dvi_is_valid[0x154]=1;
-  dvi_is_valid[0x354]=1;
-  
-  for(int i=0;i<256;i++) {
-    int xor_word=(i&1);
-    int xnor_word=(i&1);    
-    for(int b=1;b<8;b++) {
-      xor_word|=( ((i>>b)&1)^((xor_word>>(b-1))&1) )<<b;
-      xnor_word|=( ((i>>b)&1)^((xnor_word>>(b-1))&1)^1 )<<b;
-    }
-    xor_word|=0x100;
-
-    if (decode_10b(xor_word)!=i) {
-      fprintf(stderr,"ERROR: DVI XOR word 0x%03x (%s) should decode to 0x%02x, but decodes to 0x%02x\n",
-	      xor_word,binstr(xor_word),i,decode_10b(xor_word));
-      exit(-1);
-    }
-    
-    if (decode_10b(xnor_word)!=i) {
-      fprintf(stderr,"ERROR: DVI XNOR word 0x%03x (%s) should decode to 0x%02x, but decodes to 0x%02x\n",
-	      xor_word,binstr(xnor_word),i,decode_10b(xnor_word));
-      exit(-1);
-    }
-    
-    int word=-1;
-    
-    // Store non-inverted words
-    if (0) {
-      fprintf(stderr,"DEBUG: value=%d (%d ones), %d vs %d ones for $%03X (%s)",
-	      i,count_ones(i),count_ones(xor_word),count_ones(xnor_word),
-	      xor_word,binstr(xor_word));
-      fprintf(stderr," vs $%03X (%s)\n",xnor_word,binstr(xnor_word));
-    }
-    if ((count_ones(i)>4)||((count_ones(i)==4)&&(!(i&1))))
-      {
-	word=xnor_word;
-	if (dvi_is_valid[xnor_word]) {
-	  fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (xnor)\n",
-		  xnor_word,binstr(xnor_word));
-	  fprintf(stderr,"       prev: is_pixel=%d, is_control=%d, is_data=%d, is_guard=%d, value=0x%02x\n",
-		  dvi_is_pixel[xnor_word],
-		  dvi_is_control[xnor_word],
-		  dvi_is_data[xnor_word],
-		  dvi_is_guard[xnor_word],
-		  dvi_value[xnor_word]);
-	  
-	  exit(-1);
-	}
-	dvi_is_pixel[xnor_word]=1;
-	dvi_value[xnor_word]=i;
-	dvi_is_valid[xnor_word]=1;
-	//	fprintf(stderr,"DEBUG: Using XNOR encoding of %d\n",i);
-	//	 fprintf(stderr,"DEBUG: Pixel value 0x%02X XNOR encodes to %4d (%s)\n",i,xnor_word,binstr(xnor_word));
-      }
-    else
-      {
-	word=xor_word;
-	if (dvi_is_valid[xor_word]) {
-	  fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (xor)\n",
-		  xor_word,binstr(xor_word));
-	  fprintf(stderr,"       prev: is_pixel=%d, value=0x%02x\n",
-		  dvi_is_pixel[xor_word],dvi_value[xor_word]);
-	  exit(-1);
-	}
-	dvi_is_pixel[xor_word]=1;
-	dvi_value[xor_word]=i;
-	dvi_is_valid[xor_word]=1;
-	//	fprintf(stderr,"DEBUG: Pixel value 0x%02X XOR  encodes to %4d (%s)\n",i,xor_word,binstr(xor_word));
-      }
-
+  int ctrl_codes[4]={0x2ab,0x0ab,0x154,0x354};
+  for(int i=0;i<4;i++)
     {
-      word^=0x2ff;
-      if (dvi_is_valid[word]) {
-	fprintf(stderr,"ERROR: DVI word 0x%03x (%s) multiply defined (neg)\n",
-	        word,binstr(word));
-	exit(-1);
-      }
-      dvi_is_pixel[word]=1;
-      dvi_is_valid[word]=1;
-      dvi_value[word]=i;
-      //      fprintf(stderr,"DEBUG: Pixel value 0x%02X NEG  encodes to %4d (%s)\n",i,word,binstr(word));
+      int c=flip10(ctrl_codes[i]);
+      dvi_is_control[c]=1;
+      dvi_is_valid[c]=1;
     }
-    
-  }
 
+  // Load the TMDS decode table calculated by Hamster.
+  for(int i=0;tmds_refs[i].code!=-1;i++) {
+    int c=flip10(tmds_refs[i].code);
+    if (tmds_refs[i].is_pixel) {
+      dvi_is_valid[c]=1;
+      dvi_is_pixel[c]=1;
+      dvi_value[c]=tmds_refs[i].value;
+    }
+    if (tmds_refs[i].is_terc) {
+      dvi_is_data[c]=1;
+      dvi_terc_value[c]=tmds_refs[i].terc;
+    }
+  }
+  
   int count=0;
-  for(int i=0;i<1024;i++) if (dvi_is_pixel[i]) count++;
+  for(int i=0;i<1024;i++)
+    if (dvi_is_pixel[i]) {
+      count++;
+    }
   fprintf(stderr,"DEBUG: %d unique pixel values\n",count);
 
   return 0;
