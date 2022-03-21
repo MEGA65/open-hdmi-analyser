@@ -3,6 +3,20 @@
 #include <string.h>
 #include <strings.h>
 
+struct tmds_ref {
+  int code;
+  int is_pixel;
+  int value;
+  int is_terc;
+  int terc;
+};
+
+struct tmds_ref tmds_refs[]=
+  {
+#include "tmds_table.h"
+   {-1,-1,-1,-1,-1}
+  };
+
 struct mode_line {
   int x_res,y_res,frame_rate;
   float pixel_clock_mhz;
@@ -275,6 +289,8 @@ int calc_dvi_code_table(void)
   int count=0;
   for(int i=0;i<1024;i++) if (dvi_is_pixel[i]) count++;
   fprintf(stderr,"DEBUG: %d unique pixel values\n",count);
+
+  return 0;
 }
 
 int analyse_bad_10b(int c)
@@ -310,7 +326,7 @@ int main(int argc,char **argv)
   for(int i=0;i<1024;i++) {
     int f=flip10(i);
     if (flip_check[f]) {
-      fprintf(stderr,"ERROR: Multiple tokens flip to 0x%03x (%s), including 0x03x\n",f,binstr(f),i);
+      fprintf(stderr,"ERROR: Multiple tokens flip to 0x%03x (%s), including 0x%03x\n",f,binstr(f),i);
       exit(-1);
     }
     flip_check[f]++;

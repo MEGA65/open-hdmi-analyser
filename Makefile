@@ -1,3 +1,5 @@
+all:	hist
+
 
 gen_table:	gen_table.c 
 	gcc -Wall -g -o gen_table gen_table.c
